@@ -1,0 +1,60 @@
+
+name: Guestbook CI
+
+on:
+  push:
+    paths:
+      - "guestbook/**"
+      - ".github/workflows/guestbook-ci.yml"
+  pull_request:
+    paths:
+      - "guestbook/**"
+      - ".github/workflows/guestbook-ci.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    name: Validate Kubernetes YAML
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      - name: Install YAML parser
+        run: python -m pip install pyyaml
+
+      - name: Validate Guestbook manifests
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import yaml
+
+          manifests = sorted(Path("guestbook").glob("*.yaml")) + sorted(Path("guestbook").glob("*.yml"))
+          if not manifests:
+              raise SystemExit("No Kubernetes YAML files found in guestbook/")
+          for path in manifests:
+              documents = list(yaml.safe_load_all(path.read_text(encoding="utf-8")))
+              if not documents:
+                  raise ValueError(f"{path}: empty YAML")
+              for data in documents:
+                  if not isinstance(data, dict):
+                      raise ValueError(f"{path}: expected a YAML object")
+                  for key in ("apiVersion", "kind", "metadata"):
+                      if key not in data:
+                          raise ValueError(f"{path}: missing {key}")
+                  metadata = data.get("metadata")
+                  if not isinstance(metadata, dict) or not metadata.get("name"):
+                      raise ValueError(f"{path}: metadata.name is required")
+                  print(f"OK: {path} ({data['kind']}/{metadata['name']})")
+          PY
